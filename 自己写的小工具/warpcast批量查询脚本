@@ -1,0 +1,119 @@
+import requests
+import json
+
+def get_fid_by_username(username):
+    # 构造URL
+    url = f"https://client.warpcast.com/v2/user-by-username?username={username}"
+    
+    try:
+        # 发送GET请求
+        response = requests.get(url)
+        
+        # 检查请求是否成功
+        if response.status_code == 200:
+            # 解析JSON响应
+            data = json.loads(response.text)
+            
+            # 提取fid值
+            fid = data.get('result', {}).get('user', {}).get('fid', None)
+            
+            if fid is not None:
+                return fid
+            else:
+                return "未找到fid值"
+        else:
+            return f"请求失败，状态码: {response.status_code}"
+            
+    except requests.exceptions.RequestException as e:
+        return f"发生错误: {str(e)}"
+    except json.JSONDecodeError:
+        return "无法解析JSON响应"
+
+def read_usernames_from_file(filename):
+    """从txt文件读取username列表"""
+    usernames = []
+    try:
+        with open(filename, 'r', encoding='utf-8') as file:
+            usernames = [line.strip() for line in file if line.strip()]
+        return usernames
+    except FileNotFoundError:
+        return f"错误：找不到文件 {filename}"
+    except Exception as e:
+        return f"读取文件时发生错误: {str(e)}"
+
+def check_spam_status(fid, spam_file):
+    """检查fid是否在spam文件中并获取状态"""
+    try:
+        with open(spam_file, 'r', encoding='utf-8') as file:
+            for line in file:
+                try:
+                    data = json.loads(line.strip())
+                    # 检查type字段中的fid是否匹配
+                    if 'type' in data and 'fid' in data['type']:
+                        if str(data['type']['fid']) == str(fid):  # 对比fid
+                            label_type = data.get('label_type', '未知类型')
+                            label_value = data.get('label_value', '未知值')
+                            
+                            # 如果label_type是spam，根据label_value输出不同信息
+                            if label_type == 'spam':
+                                if label_value == 0:
+                                    return True, "你已被项目方拖进垃圾用户数据集，值为0--可能参与垃圾行为"
+                                elif label_value == 1:
+                                    return True, "你已被项目方拖进垃圾用户数据集，值为1--可能会参与垃圾内容行为"
+                                elif label_value == 2:
+                                    return True, "恭喜你幸运儿，虽然被项目方拖进垃圾用户数据集，值为2--不太可能参与垃圾信息行为"
+                                else:
+                                    return True, f"你已被项目发拖进垃圾用户数据集，未知的label_value: {label_value}"
+                            # 如果label_type不是spam
+                            else:
+                                return False, f"label_type: {label_type}（非spam），label_value: {label_value}"
+                except json.JSONDecodeError:
+                    continue
+            return False, "恭喜你，高质量用户！未被拖进垃圾用户数据集"
+    except FileNotFoundError:
+        return False, f"错误：找不到文件 {spam_file}"
+    except Exception as e:
+        return False, f"检查spam文件时发生错误: {str(e)}"
+
+def write_results_to_file(results, output_file):
+    """将结果写入文件"""
+    try:
+        with open(output_file, 'w', encoding='utf-8') as file:
+            for username, fid, status in results:
+                file.write(f"用户名: {username}, fid: {fid}, 结果: {status}\n")
+    except Exception as e:
+        print(f"写入文件时发生错误: {str(e)}")
+
+# 主程序
+if __name__ == "__main__":
+    # 指定文件路径
+    username_file = "user.txt"
+    spam_file = "spam.txt"
+    output_file = "jg.txt"
+    
+    # 存储所有结果 (username, fid, status)
+    results = []
+    
+    # 读取username列表
+    usernames_result = read_usernames_from_file(username_file)
+    
+    if isinstance(usernames_result, str):  # 如果返回的是错误信息
+        results.append(("N/A", "N/A", usernames_result))
+        print(usernames_result)
+    else:
+        # 逐个查询每个username的fid并检查spam状态
+        for username in usernames_result:
+            fid = get_fid_by_username(username)
+            print(f"用户名 {username} 的fid值是: {fid}")
+            
+            if isinstance(fid, int):  # 只有当fid是整数时才检查spam
+                is_spam, status_message = check_spam_status(fid, spam_file)
+                results.append((username, fid, status_message))
+                print(status_message)
+            else:
+                results.append((username, fid, fid))  # fid不是整数时，直接用返回的错误信息作为状态
+                print(fid)
+    
+    # 将结果写入jg.txt
+    write_results_to_file(results, output_file)
+    print(f"结果已写入 {output_file}")
